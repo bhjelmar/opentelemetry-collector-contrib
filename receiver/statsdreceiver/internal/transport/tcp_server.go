@@ -109,7 +109,12 @@ func (t *tcpServer) handleConn(c net.Conn, transferChan chan<- Metric) {
 
 // Close closes the server.
 func (t *tcpServer) Close() error {
+	if err := t.listener.Close(); err != nil {
+		return fmt.Errorf("error closing listener: %w", err)
+	}
+
 	close(t.stopChan)
+
 	t.wg.Wait()
-	return t.listener.Close()
+	return nil
 }
