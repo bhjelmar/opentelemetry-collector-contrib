@@ -80,36 +80,29 @@ LOOP:
 
 // handleConn is helper that parses the buffer and split it line by line to be parsed upstream.
 func (t *tcpServer) handleConn(c net.Conn, transferChan chan<- Metric) {
-
 	defer c.Close()
 	defer t.wg.Done()
 
 	reader := bufio.NewReader(c)
-	var remainder []byte
 
 	for {
-		line, err := reader.ReadBytes('\n')
+		line, err := reader.ReadString('\n')
+		line = strings.TrimSpace(line)
+
 		if errors.Is(err, io.EOF) {
-			if len(line) > 0 {
-				remainder = append(remainder, line...)
-				processedLine := strings.TrimSpace(string(remainder))
-				if processedLine != "" {
-					transferChan <- Metric{processedLine, c.LocalAddr()}
-				}
+			if line != "" {
+				transferChan <- Metric{line, c.LocalAddr()}
 			}
 			return
 		}
+
 		if err != nil {
 			t.reporter.OnDebugf("TCP transport (%s) Error reading payload: %v", c.LocalAddr(), err)
 			return
 		}
 
-		// Process the complete line
-		fullLine := append(remainder, line...)
-		remainder = nil // Clear remainder as it is now fully processed
-		processedLine := strings.TrimSpace(string(fullLine))
-		if processedLine != "" {
-			transferChan <- Metric{processedLine, c.LocalAddr()}
+		if line != "" {
+			transferChan <- Metric{line, c.LocalAddr()}
 		}
 	}
 }
