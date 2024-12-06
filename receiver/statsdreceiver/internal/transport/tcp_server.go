@@ -4,7 +4,7 @@
 package transport // import "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/statsdreceiver/internal/transport"
 
 import (
-	"bytes"
+	"bufio"
 	"errors"
 	"fmt"
 	"io"
@@ -80,30 +80,36 @@ LOOP:
 
 // handleConn is helper that parses the buffer and split it line by line to be parsed upstream.
 func (t *tcpServer) handleConn(c net.Conn, transferChan chan<- Metric) {
-	payload := make([]byte, 4096)
+
+	defer c.Close()
+	defer t.wg.Done()
+
+	reader := bufio.NewReader(c)
 	var remainder []byte
+
 	for {
-		n, err := c.Read(payload)
-		if err != nil {
-			if !errors.Is(err, io.EOF) {
-				t.reporter.OnDebugf("TCP transport (%s) Error reading payload: %v", c.LocalAddr(), err)
+		line, err := reader.ReadBytes('\n')
+		if errors.Is(err, io.EOF) {
+			if len(line) > 0 {
+				remainder = append(remainder, line...)
+				processedLine := strings.TrimSpace(string(remainder))
+				if processedLine != "" {
+					transferChan <- Metric{processedLine, c.LocalAddr()}
+				}
 			}
-			t.wg.Done()
 			return
 		}
-		buf := bytes.NewBuffer(append(remainder, payload[0:n]...))
-		for {
-			bytes, err := buf.ReadBytes((byte)('\n'))
-			if errors.Is(err, io.EOF) {
-				if len(bytes) != 0 {
-					remainder = bytes
-				}
-				break
-			}
-			line := strings.TrimSpace(string(bytes))
-			if line != "" {
-				transferChan <- Metric{line, c.LocalAddr()}
-			}
+		if err != nil {
+			t.reporter.OnDebugf("TCP transport (%s) Error reading payload: %v", c.LocalAddr(), err)
+			return
+		}
+
+		// Process the complete line
+		fullLine := append(remainder, line...)
+		remainder = nil // Clear remainder as it is now fully processed
+		processedLine := strings.TrimSpace(string(fullLine))
+		if processedLine != "" {
+			transferChan <- Metric{processedLine, c.LocalAddr()}
 		}
 	}
 }
